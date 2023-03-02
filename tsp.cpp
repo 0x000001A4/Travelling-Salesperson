@@ -8,7 +8,6 @@
 #include <limits>
 #include "nqueue/queue.hpp"
 
-
 class VisitedCity {
 	public: 
 		std::vector<int> _tour;
@@ -58,7 +57,7 @@ class TSP {
         float _maxValue;
         float _bestTourCost = 999999999;
         std::vector<int> _bestTour;
-        std::vector<std::vector<int>> _roadsCost;
+        std::vector<std::vector<float>> _roadsCost;
         std::vector<std::vector<int>> _citiesNeighbors;
         std::vector<std::pair<float,float>> _minPairs;
 
@@ -87,7 +86,7 @@ class TSP {
 
                 if (firstLine) {
                     line_ss >> _numberOfCities >> _numberOfRoads;
-                    _roadsCost.resize(_numberOfCities, std::vector<int>(_numberOfCities, 0));
+                    _roadsCost.resize(_numberOfCities, std::vector<float>(_numberOfCities, std::numeric_limits<float>::infinity()));
                     _citiesNeighbors.resize(_numberOfCities);
                     firstLine = false;
                     continue;
