@@ -186,26 +186,30 @@ class TSP {
             VisitedCity newVisitedCity(tourOrigin, 0, initial_lb, 1, 0);
             PriorityQueue<VisitedCity, VisitedCity::CompareCityByLowerBound> queue;
             queue.push(newVisitedCity);
- 
+            
+            VisitedCity city;
+            std::vector<int> tour, newTour;
+            float tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
+            int length, node;
             // Branch and Bound main loop
             while (!queue.empty()) {
-                VisitedCity city = queue.pop();
-                std::cout << ".. Visiting new city in the context of tour: ";
-                showTour(city.getTour());
-                std::cout << "| Node: " << city.getNode() << "; Cost: " << city.getCost() <<
-                    "; Lower-bound: " << city.getLB() << "; Length: " << city.getLength() << std::endl;
+                city = queue.pop();
+                //std::cout << ".. Visiting new city in the context of tour: ";
+                //showTour(city.getTour());
+                //std::cout << "| Node: " << city.getNode() << "; Cost: " << city.getCost() <<
+                //    "; Lower-bound: " << city.getLB() << "; Length: " << city.getLength() << std::endl;
                 
-                std::vector<int> tour = city.getTour();
-                float tourCost = city.getCost();
-                float bound = city.getLB();
-                int length = city.getLength();
-                int node = city.getNode();
+                tour = city.getTour();
+                tourCost = city.getCost();
+                bound = city.getLB();
+                length = city.getLength();
+                node = city.getNode();
 
                 if (bound >= _bestTourCost) {
                     return;
                 }
                 if (length+1 > _numberOfCities) {
-                    float costUntilEnd = tourCost + _roadsCost[node][0];
+                    costUntilEnd = tourCost + _roadsCost[node][0];
                     if (costUntilEnd < _bestTourCost) {
                         tour.push_back(0);
                         _bestTour = tour;
@@ -218,13 +222,13 @@ class TSP {
                     for (const int& destiny: _citiesNeighbors[node]) {
                         // If this destiny isn't yet part of the tour (std::find returns tour.end())
                         if (std::find(tour.begin(), tour.end(), destiny) == tour.end()) {
-                            float cost = _roadsCost[node][destiny];
-                            float newBound = newLowerBound(node, destiny, initial_lb, cost);
+                            cost = _roadsCost[node][destiny];
+                            newBound = newLowerBound(node, destiny, initial_lb, cost);
                             if (newBound > _bestTourCost) continue;
-                            std::vector<int> newTour = tour;
+                            newTour = tour;
                             newTour.push_back(destiny);
-                            float newTourCost = tourCost + cost;
-                            VisitedCity newVisitedCity(newTour, newTourCost, newBound, length+1, destiny);
+                            newTourCost = tourCost + cost;
+                            newVisitedCity = VisitedCity(newTour, newTourCost, newBound, length+1, destiny);
                             queue.push(newVisitedCity);
                         }
                     }
