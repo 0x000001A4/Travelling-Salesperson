@@ -8,6 +8,9 @@
 #ifndef _TSP_QUEUE_HPP
 #define _TSP_QUEUE_HPP
 
+#include <vector>
+#include <utility>
+
 // A queue where the elements are stored in an increasing order.
 // This implementation uses a binary heap.
 //
