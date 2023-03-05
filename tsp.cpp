@@ -262,6 +262,7 @@ class TSP {
                             queue.push(newVisitedCity);
                         }
                     }
+                    tour->visitedCities.clear();
                 }
             }
         }
