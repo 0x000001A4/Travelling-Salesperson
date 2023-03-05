@@ -13,6 +13,7 @@
 struct tour_t {
     int node;
     std::shared_ptr<tour_t> prev;
+    std::vector<bool> visitedCities;
 };
 
 class VisitedCity {
@@ -21,7 +22,6 @@ class VisitedCity {
 		float _cost;
 		float _lowerBound;
 		int _length;
-        int _node;
 
         virtual ~VisitedCity() = default;
 		VisitedCity() = default;
@@ -32,12 +32,11 @@ class VisitedCity {
             }
         };
 
-		VisitedCity(std::shared_ptr<tour_t> tour, float cost, float lowerBound, int length, int node) {
+		VisitedCity(std::shared_ptr<tour_t> tour, float cost, float lowerBound, int length) {
 			_tour = tour;
 			_cost = cost;
 			_lowerBound = lowerBound;
 			_length = length;
-            _node = node;
 		}
 
 		std::shared_ptr<tour_t> getTour() {
@@ -52,9 +51,6 @@ class VisitedCity {
 		int getLength() {
 			return _length;
 		}
-		int getNode() {
-			return _node;
-		}
 };
 
 class TSP {
@@ -62,7 +58,7 @@ class TSP {
         int _numberOfCities;
         int _numberOfRoads;
         float _maxValue;
-        float _bestTourCost = 999999999;
+        float _bestTourCost = std::numeric_limits<float>::infinity();
         std::shared_ptr<tour_t> _bestTour;
         std::vector<std::vector<float>> _roadsCost;
         std::vector<std::vector<int>> _citiesNeighbors;
@@ -206,15 +202,18 @@ class TSP {
             return false;
         }
 
+
         void findSolution() {
             std::cout << "------ BRANCH AND BOUND ------" << std::endl;
             // Initialize Branch and Bound
             std::shared_ptr<tour_t> tour = std::make_shared<tour_t>();
             tour->node = 0;
             tour->prev = nullptr;
+            tour->visitedCities.resize(_numberOfCities);
+            tour->visitedCities[0] = true;
             float initial_lb = computeInitialLowerBound();
             PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound> queue;
-            queue.push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1, 0));
+            queue.push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
             
             std::shared_ptr<VisitedCity> city, newVisitedCity;
             float tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
@@ -222,17 +221,16 @@ class TSP {
             // Branch and Bound main loop
             while (!queue.empty()) {
                 city = queue.pop();
-                /*
-                std::cout << ".. Visiting new city in the context of tour: (";
-                showTour(city->getTour());
-                std::cout << " ) | Node: " << city->getNode() << "; Cost: " << city->getCost() <<
-                    "; Lower-bound: " << city->getLB() << "; Length: " << city->getLength() << std::endl;*/
-                
                 tour = city->getTour();
                 tourCost = city->getCost();
                 bound = city->getLB();
                 length = city->getLength();
-                node = city->getNode();
+                node = tour->node;
+                /*
+                std::cout << ".. Visiting new city in the context of tour: (";
+                showTour(city->getTour());
+                std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
+                    "; Lower-bound: " << bound << "; Length: " << length << std::endl;*/
 
                 if (bound >= _bestTourCost) {
                     return;
@@ -250,15 +248,17 @@ class TSP {
                     }
                 } else {
                     for (const int& destiny: _citiesNeighbors[node]) {
-                        if (!tourHasNode(tour, destiny)) {
+                        if (tour->visitedCities[destiny] == 0) {
                             cost = _roadsCost[node][destiny];
                             newBound = newLowerBound(node, destiny, initial_lb, cost);
-                            if (newBound > _bestTourCost) continue;                              
+                            if (newBound > _bestTourCost) continue;
                             std::shared_ptr<tour_t> newTour = std::make_shared<tour_t>();
                             newTour->prev = tour;
                             newTour->node = destiny;
+                            newTour->visitedCities = tour->visitedCities;
+                            newTour->visitedCities[destiny] = true;
                             newTourCost = tourCost + cost;
-                            newVisitedCity = std::make_shared<VisitedCity>(newTour, newTourCost, newBound, length+1, destiny);
+                            newVisitedCity = std::make_shared<VisitedCity>(newTour, newTourCost, newBound, length+1);
                             queue.push(newVisitedCity);
                         }
                     }
