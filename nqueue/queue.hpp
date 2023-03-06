@@ -60,13 +60,13 @@ class PriorityQueue
 			index_t i = node;
 			
 			// Compare with the left node
-			if ((long unsigned int)left_child < _buffer.size() and _cmp(_buffer[node], _buffer[left_child]))
+			if (left_child < _buffer.size() and _cmp(_buffer[node], _buffer[left_child]))
 			{
 				i = left_child;
 			}
 			
 			// Compare with the right node
-			if ((long unsigned int)right_child < _buffer.size() and _cmp(_buffer[i], _buffer[right_child]))
+			if (right_child < _buffer.size() and _cmp(_buffer[i], _buffer[right_child]))
 			{
 				i = right_child;
 			}
@@ -85,13 +85,13 @@ class PriorityQueue
 		PriorityQueue& operator=(const PriorityQueue& other) = default;
 		
 		// Check if the priority is empty
-		bool empty()
+		bool empty() const
 		{
 			return _buffer.empty();
 		}
 		
 		// Return the number of elements in the queue
-		index_t size()
+		index_t size() const
 		{
 			return _buffer.size();
 		}
@@ -155,6 +155,24 @@ class PriorityQueue
 			bubble_down(0);
 			
 			return top_val;
+		}
+		
+		// Return the top node in the queue.
+		T& top()
+		{
+			return _buffer.front();
+		}
+		
+		// Return the top node in the queue.
+		const T& top() const
+		{
+			return _buffer.front();
+		}
+		
+		// Clear the contents of the queue.
+		void clear()
+		{
+			_buffer.clear();
 		}
 		
 		// Print the contents of the queue. Note that you can use any callable object as parameter,
