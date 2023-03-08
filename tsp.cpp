@@ -266,7 +266,7 @@ public:
                 for (const int& destiny : _citiesNeighbors[node]) {
                     if (hasNotVisitedCity(tour->visitedCities, destiny)) {
                         cost = _roadsCost[node][destiny];
-                        newBound = newLowerBound(node, destiny, initial_lb, cost);
+                        newBound = newLowerBound(node, destiny, bound, cost);
                         if (newBound > _bestTourCost) continue;
                         queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost+cost, newBound, length + 1));
                     }
