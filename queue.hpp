@@ -1,6 +1,5 @@
 /*************************************************************************
 	Copyright (C) 2023 Nicolas L. Guidotti. All rights reserved.
-
 	This file is part of the tsp library, which is licensed under 
 	the terms contained in the LICENSE file.
  **************************************************************************/
