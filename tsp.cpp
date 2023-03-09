@@ -81,7 +81,6 @@ public:
         // Read input from stdin
         std::string cities_file = argv[1];
         _maxValue = std::stof(argv[2]);
-        _bestTourCost = _maxValue;
 
         // Initiate structures
         std::ifstream file(cities_file);
@@ -131,7 +130,10 @@ public:
     }
 
     void print_result() {
-        if (_bestTourCost > _maxValue) {
+        // When bestourcost == maxvalue, since they are doubles,
+        // they might not be exactly equal, thus we add 0.01 
+        // (since the cost goes only up to 1 decimal place)
+        if (_bestTourCost > _maxValue + 0.01) {
             std::cout << "NO SOLUTION" << std::endl;
         }
         else {
