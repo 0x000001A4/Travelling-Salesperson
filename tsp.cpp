@@ -1,5 +1,4 @@
 #include <iostream>
-#include <iomanip>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -14,14 +13,14 @@
 struct tour_t {
     int node;
     std::shared_ptr<tour_t> prev;
-    double visitedCities;
+    int visitedCities;
 };
 
 class VisitedCity {
 public:
     std::shared_ptr<tour_t> _tour;
-    double _cost;
-    double _lowerBound;
+    float _cost;
+    float _lowerBound;
     int _length;
 
     virtual ~VisitedCity() = default;
@@ -29,14 +28,11 @@ public:
 
     struct CompareCityByLowerBound {
         bool operator()(const std::shared_ptr<VisitedCity>& a, const std::shared_ptr<VisitedCity>& b) {
-            if (a->_lowerBound == b->_lowerBound) {
-                return a->_tour->node > b->_tour->node;
-            }
             return a->_lowerBound > b->_lowerBound;
         }
     };
 
-    VisitedCity(std::shared_ptr<tour_t> tour, double cost, double lowerBound, int length) {
+    VisitedCity(std::shared_ptr<tour_t> tour, float cost, float lowerBound, int length) {
         _tour = tour;
         _cost = cost;
         _lowerBound = lowerBound;
@@ -46,10 +42,10 @@ public:
     std::shared_ptr<tour_t> getTour() {
         return _tour;
     }
-    double getCost() {
+    float getCost() {
         return _cost;
     }
-    double getLB() {
+    float getLB() {
         return _lowerBound;
     }
     int getLength() {
@@ -61,12 +57,12 @@ class TSP {
 public:
     int _numberOfCities;
     int _numberOfRoads;
-    double _maxValue;
-    double _bestTourCost = std::numeric_limits<double>::infinity();
+    float _maxValue;
+    float _bestTourCost = std::numeric_limits<float>::infinity();
     std::shared_ptr<tour_t> _bestTour;
-    std::vector<std::vector<double>> _roadsCost;
+    std::vector<std::vector<float>> _roadsCost;
     std::vector<std::vector<int>> _citiesNeighbors;
-    std::vector<std::pair<double, double>> _minPairs;
+    std::vector<std::pair<float, float>> _minPairs;
 
     TSP() = default;
     virtual ~TSP() = default;
@@ -81,6 +77,7 @@ public:
         // Read input from stdin
         std::string cities_file = argv[1];
         _maxValue = std::stof(argv[2]);
+        _bestTourCost = _maxValue;
 
         // Initiate structures
         std::ifstream file(cities_file);
@@ -93,7 +90,7 @@ public:
 
             if (firstLine) {
                 line_ss >> _numberOfCities >> _numberOfRoads;
-                _roadsCost.resize(_numberOfCities, std::vector<double>(_numberOfCities, std::numeric_limits<double>::infinity()));
+                _roadsCost.resize(_numberOfCities, std::vector<float>(_numberOfCities, std::numeric_limits<float>::infinity()));
                 _citiesNeighbors.resize(_numberOfCities);
                 firstLine = false;
                 continue;
@@ -101,7 +98,7 @@ public:
 
             int cityO;
             int cityD;
-            double cost;
+            int cost;
             line_ss >> cityO >> cityD >> cost;
             _roadsCost[cityO][cityD] = cost;
             _roadsCost[cityD][cityO] = cost;
@@ -111,81 +108,76 @@ public:
         file.close();
 
         // Show the cost matrix
-        //std::cout << "----- INIT PHASE ------" << std::endl;
-        //std::cout << "Showing roads cost between each city" << std::endl;
-        //for (std::size_t i = 0; i < _roadsCost.size(); i++) {
-        //    for (std::size_t j = 0; j < _roadsCost[i].size(); j++) {
-        //        std::cout << _roadsCost[i][j] << " ";
-        //    }
-        //    std::cout << std::endl;
-        //}
-        //std::cout << "Showing cities neighbours list" << std::endl;
-        //for (std::size_t i = 0; i < _citiesNeighbors.size(); i++) {
-        //    for (std::size_t j = 0; j < _citiesNeighbors[i].size(); j++) {
-        //        std::cout << _citiesNeighbors[i][j] << " ";
-        //    }
-        //    std::cout << std::endl;
-        //}
+        std::cout << "----- INIT PHASE ------" << std::endl;
+        std::cout << "Showing roads cost between each city" << std::endl;
+        for (std::size_t i = 0; i < _roadsCost.size(); i++) {
+            for (std::size_t j = 0; j < _roadsCost[i].size(); j++) {
+                std::cout << _roadsCost[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "Showing cities neighbours list" << std::endl;
+        for (std::size_t i = 0; i < _citiesNeighbors.size(); i++) {
+            for (std::size_t j = 0; j < _citiesNeighbors[i].size(); j++) {
+                std::cout << _citiesNeighbors[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
         return 0;
     }
 
     void print_result() {
-        // When bestourcost == maxvalue, since they are doubles,
-        // they might not be exactly equal, thus we add 0.01 
-        // (since the cost goes only up to 1 decimal place)
-        if (_bestTourCost > _maxValue + 0.01) {
+        if (_bestTourCost > _maxValue) {
             std::cout << "NO SOLUTION" << std::endl;
         }
         else {
-            bool first = true;
             std::stack<int> bestTour;
             while (_bestTour != nullptr) {
                 bestTour.push(_bestTour->node);
                 _bestTour = _bestTour->prev;
             }
-            std::cout << std::fixed << std::setprecision(1) << _bestTourCost << std::endl;
+            std::cout << "Best tour cost: " << _bestTourCost << std::endl;
+            std::cout << "Best tour:";
             while (bestTour.size() > 0) {
-                if (first) first = false;
-                else std::cout << " ";
-                std::cout << bestTour.top();
+                std::cout << " " << bestTour.top();
                 bestTour.pop();
             }
             std::cout << std::endl;
         }
     }
 
-    std::pair<double, double> findMinPairs(const int origin) {
-        double min_one = std::numeric_limits<double>::max();
-        double min_two = std::numeric_limits<double>::max();
+    std::pair<float, float> findMinPairs(const int origin) {
+        float min_one = std::numeric_limits<float>::max();
+        float min_two = std::numeric_limits<float>::max();
         for (const int destiny : _citiesNeighbors[origin]) {
             if (_roadsCost[origin][destiny] < min_one) {
                 min_two = min_one;
                 min_one = _roadsCost[origin][destiny];
             }
-            else if (_roadsCost[origin][destiny] < min_two) {
+            else if (_roadsCost[origin][destiny] < min_two && _roadsCost[origin][destiny] != min_one) {
                 min_two = _roadsCost[origin][destiny];
             }
         }
         return std::make_pair(min_one, min_two);
     }
 
-    double computeInitialLowerBound() {
-        double sum = 0;
+    float computeInitialLowerBound() {
+        float sum = 0;
         for (int origin = 0; origin < _numberOfCities; origin++) {
-            std::pair<double, double> minPair = findMinPairs(origin);
+            std::pair<float, float> minPair = findMinPairs(origin);
             _minPairs.push_back(minPair);
             sum += minPair.first + minPair.second;
         }
-        //std::cout << "Cities min1 and min2 info:" << std::endl;
-        //for (int i = 0; i < _numberOfCities; i++) {
-        //    std::cout << " -> City " << i << " | min1: " << _minPairs[i].first << "; min2: " << _minPairs[i].second << std::endl;
-        //}
+        std::cout << "Cities min1 and min2 info:" << std::endl;
+        for (int i = 0; i < _numberOfCities; i++) {
+            std::cout << " -> City " << i << " | min1: " << _minPairs[i].first << "; min2: " << _minPairs[i].second << std::endl;
+        }
         return sum / 2;
     }
 
-    double newLowerBound(int origin, int destiny, double LB, double cost) {
-        double cf = cost >= _minPairs[origin].second ? _minPairs[origin].second : _minPairs[origin].first;
-        double ct = cost >= _minPairs[destiny].second ? _minPairs[destiny].second : _minPairs[destiny].first;
+    float newLowerBound(int origin, int destiny, float LB, float cost) {
+        float cf = cost >= _minPairs[origin].second ? _minPairs[origin].second : _minPairs[origin].first;
+        float ct = cost >= _minPairs[destiny].second ? _minPairs[destiny].second : _minPairs[destiny].first;
         //std::cout << "LB: " << LB << " cost: " << cost << " " << "cf: " << cf << " ct: " << ct << std::endl;
         return LB + cost - (cf + ct) / 2;
     }
@@ -228,80 +220,77 @@ public:
         return newTour;
     }
 
-    void printBits(int num) {
-        // Determine the number of bits needed to represent the integer
-        int numBits = sizeof(num) * 8;
-
-        // Create a mask to extract each bit from the integer
-        unsigned int mask = 1u << (numBits - 1);
-
-        // Loop through each bit and print it as 0 or 1
-        for (int i = 0; i < numBits; i++) {
-            int bit = (num & mask) ? 1 : 0;
-            std::cout << bit;
-            mask >>= 1;
-        }
-
-        std::cout << std::endl;
-    }
-
     void findSolution() {
-        //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
+        std::cout << "------ BRANCH AND BOUND ------" << std::endl;
         // Initialize Branch and Bound
         std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
-        double initial_lb = computeInitialLowerBound();
+        // TODO: PARALELIZE THIS
+        float initial_lb = computeInitialLowerBound();
+        // END
+
+        // 1 of this queues per _numberOfCities (number of threads)
         PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound> queue;
         queue.push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
 
-        std::shared_ptr<VisitedCity> city;
-        double tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
-        int length, node;
         // Branch and Bound main loop
+        /*
+        * Private variables: (city, tour, tourCost, bound, length, node)
+        * Shared variables:
+        *  -> read-only: _numberOfCities, _roadsCost, _citiesNeighbors,
+        *  -> read/write: _bestTourCost
+        */
         while (!queue.empty()) {
-            city = queue.pop();
-            tour = city->getTour();
-            tourCost = city->getCost();
-            bound = city->getLB();
-            length = city->getLength();
-            node = tour->node;
-
-            //std::cout << ".. Visiting new city in the context of tour: (";
-            //showTour(city->getTour());
-            //std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
-            //    "; Lower-bound: " << bound << "; Length: " << length << "; Visited cities: ";
-            //printBits(tour->visitedCities);
-            //std::cout << std::endl;
-
+            // ATTENTION
+            std::shared_ptr<VisitedCity> city = queue.pop();
+            // ATTENTION
+            std::shared_ptr<tour_t> currentTour = city->getTour();
+            float tourCost = city->getCost();
+            float bound = city->getLB();
+            int length = city->getLength();
+            int node = currentTour->node;
+            /*
+            std::cout << ".. Visiting new city in the context of tour: (";
+            showTour(city->getTour());
+            std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
+                "; Lower-bound: " << bound << "; Length: " << length << std::endl;
+            */
             if (bound >= _bestTourCost) {
                 return;
             }
-
-            
-            if (length == _numberOfCities) {
-                costUntilEnd = tourCost + _roadsCost[node][0];
+            if (length + 1 > _numberOfCities) {
+                float costUntilEnd = tourCost + _roadsCost[node][0];
+                // ATTENTION
                 if (costUntilEnd < _bestTourCost) {
                     if (!_bestTour) {
                         _bestTour = std::make_shared<tour_t>();
                         _bestTour->node = 0;
                     }
-                    _bestTour->prev = tour;
+                    _bestTour->prev = currentTour;
                     _bestTourCost = costUntilEnd;
-                    //std::cout << "!! Tour complete: ";
-                    //showTour(_bestTour);
-                    //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
+                    // ATTENTION
+                    std::cout << "!! Tour complete: ";
+                    showTour(_bestTour);
+                    std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
                 }
             }
             else {
+                // Have 1 thread per neighbor of node do this part.
+                /*
+                * Private variables: destiny, newTour, newBound, cost
+                *
+                */
                 for (const int& destiny : _citiesNeighbors[node]) {
-                    if (hasNotVisitedCity(tour->visitedCities, destiny)) {
-                        cost = _roadsCost[node][destiny];
-                        newBound = newLowerBound(node, destiny, bound, cost);
+                    if (hasNotVisitedCity(currentTour->visitedCities, destiny)) {
+                        float cost = _roadsCost[node][destiny];
+                        float newBound = newLowerBound(node, destiny, bound, cost);
                         if (newBound > _bestTourCost) continue;
-                        queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
+                        std::shared_ptr<tour_t> newTour = extendTour(currentTour, destiny);
+                        // ATTENTION
+                        queue.push(std::make_shared<VisitedCity>(newTour, tourCost + cost, newBound, length + 1));
+                        // ATTENTION
                     }
                 }
             }
-            
         }
     }
 };
@@ -317,8 +306,8 @@ int main(int argc, char* argv[]) {
 
     exec_time += omp_get_wtime();
 
-    //std::cout << "----- RESULTS ------" << std::endl;
-    //fprintf(stderr, "Time of execution: %.6fs\n", exec_time);
+    std::cout << "----- RESULTS ------" << std::endl;
+    fprintf(stderr, "Time of execution: %.6fs\n", exec_time);
     tsp.print_result();
     return 0;
 }
