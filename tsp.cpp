@@ -265,7 +265,7 @@ public:
 
     int existElementsInQueues(std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> queues) {
         for (int thread_id = omp_get_thread_num(); thread_id < omp_get_thread_num() + _numThreads; thread_id++) {
-            if (queues.size() != 0) return thread_id % _numThreads;
+            if (_queues[thread_id].size() > 0) return thread_id % _numThreads;
         }
         return -1;
     }
@@ -274,12 +274,16 @@ public:
     void findSolution() {
         //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
         // Initialize Branch and Bound
-# pragma omp master 
+
+        double initial_lb;
+#pragma omp master 
         {
-            std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
+            initial_lb = computeInitialLowerBound();
         }
-        double initial_lb = computeInitialLowerBound();
-# pragma omp barrier 
+#pragma omp barrier
+
+        std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
+        _queues[omp_get_thread_num()].push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
 
         int idx;
         // Branch and Bound main loop
@@ -288,6 +292,7 @@ public:
             omp_set_lock(_queueLocks[idx]);
             std::shared_ptr<VisitedCity> city = _queues[idx].pop();
             omp_unset_lock(_queueLocks[idx]);
+            if (!city) continue;
             std::shared_ptr<tour_t> currentTour = city->getTour();
             double tourCost = city->getCost();
             double bound = city->getLB();
@@ -347,7 +352,7 @@ int main(int argc, char* argv[]) {
     if (tsp.parse_inputs(argc, argv)) return 1;
     exec_time = -omp_get_wtime();
 
-#pragma omp parallel num_threads(4) 
+# pragma omp parallel num_threads(4) 
     {
         tsp.findSolution();
     }
