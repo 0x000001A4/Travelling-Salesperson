@@ -76,10 +76,6 @@ public:
     }
 
     ~TSP() {
-        for (int tid = 0; tid < omp_get_num_threads(); tid++) {
-            omp_destroy_lock(_queueLocks[tid]);
-        }
-        omp_destroy_lock(_bestTourLock);
     }
 
     int parse_inputs(int argc, char* argv[]) {
@@ -232,10 +228,12 @@ public:
     }
 
     std::shared_ptr<tour_t> extendTour(std::shared_ptr<tour_t> tour, int destiny) {
+        //printf("INSIDE EXTEND TOUR with Thread: %d\n",omp_get_thread_num());
         std::shared_ptr<tour_t> newTour = std::make_shared<tour_t>();
         newTour->prev = tour;
         newTour->node = destiny;
         newTour->visitedCities = visit(tour == nullptr ? 0 : tour->visitedCities, destiny);
+        //printf("EXITING TOUR with Thread: %d\n",omp_get_thread_num());
         return newTour;
     }
 
@@ -258,10 +256,14 @@ public:
 
     int existElementsInQueues(std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> queues) {
         for (int thread_id = omp_get_thread_num(); thread_id < omp_get_thread_num() + omp_get_num_threads(); thread_id++) {
-            int i = thread_id % omp_get_num_threads();
+             //omp_set_lock(_queueLocks[0]);
+            //int i = thread_id % omp_get_num_threads();
+             //printf("Couting %d: \n",i);
+             //omp_unset_lock(_queueLocks[0]);
             if (_queues[thread_id % omp_get_num_threads()].size() > 0) return thread_id % omp_get_num_threads();
         }
-        return -1;
+        if(_bestTourCost != std::numeric_limits<double>::infinity()) return -1;
+        return 0;
     }
 
 
@@ -296,7 +298,6 @@ public:
                 omp_unset_lock(_queueLocks[0]);
                 // ----- DEBUG -----
 
-
                 omp_set_lock(_queueLocks[idx]);
                 std::shared_ptr<VisitedCity> city = _queues[idx].pop();
                 omp_unset_lock(_queueLocks[idx]);
@@ -306,6 +307,7 @@ public:
                 double bound = city->getLB();
                 int length = city->getLength();
                 int node = currentTour->node;
+                std::cout << "Poping Node with Thread: "  <<  omp_get_thread_num() << std::endl;
 
                 //std::cout << ".. Visiting new city in the context of tour: (";
                 //showTour(city->getTour());
@@ -315,11 +317,13 @@ public:
                 //std::cout << std::endl;
 
                 if (bound >= _bestTourCost) {
+                   // printf("ENTERING BEST TOUR with Thread: %d\n",omp_get_thread_num());
                     omp_set_lock(_queueLocks[omp_get_thread_num()]);
-                    _queues[omp_get_thread_num()].clear();
+                    _queues[omp_get_thread_num()]= PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
                     omp_unset_lock(_queueLocks[omp_get_thread_num()]);
                     continue;
                 }
+
 
                 if (length == _numberOfCities) {
                     double costUntilEnd = tourCost + _roadsCost[node][0];
@@ -339,13 +343,18 @@ public:
                     omp_unset_lock(_bestTourLock);
                 }
                 else {
+                    std::cout << "Extering Neighbours with Thread: "  <<  omp_get_thread_num() << std::endl;
                     for (const int& destiny : _citiesNeighbors[node]) {
+                        std::cout << "Going throw neighbour: " << destiny << "with Thread: "  <<  omp_get_thread_num() << std::endl;
                         if (hasNotVisitedCity(currentTour->visitedCities, destiny)) {
+                            std::cout << "Not visited neighbour: " << destiny << "with Thread: "  <<  omp_get_thread_num() << std::endl;
                             double cost = _roadsCost[node][destiny];
                             double newBound = newLowerBound(node, destiny, bound, cost);
                             if (newBound > _bestTourCost) continue;
+                            std::cout << "Extending tour of neighbour: " << destiny << "with Thread: "  <<  omp_get_thread_num() << std::endl;
                             std::shared_ptr<tour_t> newTour = extendTour(currentTour, destiny);
                             omp_set_lock(_queueLocks[omp_get_thread_num()]);
+                            std::cout << "Pushing tour of neighbour: " << destiny << "with Thread: "  <<  omp_get_thread_num() << std::endl;
                             _queues[omp_get_thread_num()].push(std::make_shared<VisitedCity>(newTour, tourCost + cost, newBound, length + 1));
                             omp_unset_lock(_queueLocks[omp_get_thread_num()]);
                         }
@@ -353,14 +362,22 @@ public:
                 }
 
             }
-        }
+            # pragma omp single
+            {
+                for (int tid = 0; tid < omp_get_num_threads(); tid++) {
+                omp_destroy_lock(_queueLocks[tid]);
+                }   
+                omp_destroy_lock(_bestTourLock);
+            }
+        }            
+            
     }
 };
 
 int main(int argc, char* argv[]) {
 
     double exec_time;
-    omp_set_num_threads(4);
+    omp_set_num_threads(2);
     TSP tsp = TSP();
     if (tsp.parse_inputs(argc, argv)) return 1;
     exec_time = -omp_get_wtime();
