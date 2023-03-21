@@ -244,32 +244,40 @@ public:
 
         std::cout << std::endl;
     }
+    
+    int existElementsInQueues() {
+        for (int thread_id = omp_get_thread_num(); thread_id < omp_get_thread_num() + omp_get_num_threads(); thread_id++) {
+            if (queues.size() != 0) return thread_id % omp_get_num_threads();
+        }
+        return -1;
+    }
 
     void findSolution() {
         //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
         // Initialize Branch and Bound
         std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
         double initial_lb = computeInitialLowerBound();
+        std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> queue;
+        for (int tid = 0; tid < omp_get_num_threads(); tid++) {
+            queue.push_back()
+        }
         PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound> queue;
-        queue.push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
+        queue[0].push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
 
-        std::shared_ptr<VisitedCity> city;
-        double tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
-        int length, node;
         // Branch and Bound main loop
-        while (!queue.empty()) {
-            city = queue.pop();
-            tour = city->getTour();
-            tourCost = city->getCost();
-            bound = city->getLB();
-            length = city->getLength();
-            node = tour->node;
+        while ((int idx = existElementsInQueues()) != -1) {
+            std::shared_ptr<VisitedCity> city = queue[idx].pop();
+            std::shared_ptr<tour_t> currentTour = city->getTour();
+            double tourCost = city->getCost();
+            double bound = city->getLB();
+            int length = city->getLength();
+            int node = currentTour->node;
 
             //std::cout << ".. Visiting new city in the context of tour: (";
             //showTour(city->getTour());
             //std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
             //    "; Lower-bound: " << bound << "; Length: " << length << "; Visited cities: ";
-            //printBits(tour->visitedCities);
+            //printBits(currentTour->visitedCities);
             //std::cout << std::endl;
 
             if (bound >= _bestTourCost) {
@@ -278,13 +286,13 @@ public:
 
             
             if (length == _numberOfCities) {
-                costUntilEnd = tourCost + _roadsCost[node][0];
+                double costUntilEnd = tourCost + _roadsCost[node][0];
                 if (costUntilEnd < _bestTourCost) {
                     if (!_bestTour) {
                         _bestTour = std::make_shared<tour_t>();
                         _bestTour->node = 0;
                     }
-                    _bestTour->prev = tour;
+                    _bestTour->prev = currentTour;
                     _bestTourCost = costUntilEnd;
                     //std::cout << "!! Tour complete: ";
                     //showTour(_bestTour);
@@ -293,11 +301,11 @@ public:
             }
             else {
                 for (const int& destiny : _citiesNeighbors[node]) {
-                    if (hasNotVisitedCity(tour->visitedCities, destiny)) {
-                        cost = _roadsCost[node][destiny];
-                        newBound = newLowerBound(node, destiny, bound, cost);
+                    if (hasNotVisitedCity(currentTour->visitedCities, destiny)) {
+                        double cost = _roadsCost[node][destiny];
+                        double newBound = newLowerBound(node, destiny, bound, cost);
                         if (newBound > _bestTourCost) continue;
-                        queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
+                        queue.push(std::make_shared<VisitedCity>(extendTour(currentTour, destiny), tourCost + cost, newBound, length + 1));
                     }
                 }
             }
