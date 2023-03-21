@@ -14,7 +14,7 @@
 struct tour_t {
     int node;
     std::shared_ptr<tour_t> prev;
-    double visitedCities;
+    int64_t visitedCities;
 };
 
 class VisitedCity {
@@ -68,8 +68,26 @@ public:
     std::vector<std::vector<int>> _citiesNeighbors;
     std::vector<std::pair<double, double>> _minPairs;
 
-    TSP() = default;
-    virtual ~TSP() = default;
+    std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> _queues;
+    std::vector<omp_lock_t*> _queueLocks;
+    omp_lock_t* _bestTourLock = new omp_lock_t;
+    int _numThreads = omp_get_num_threads();
+
+    TSP() {
+        for (int tid = 0; tid < _numThreads; tid++) {
+            _queues.push_back(PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>());
+            _queueLocks.push_back(new omp_lock_t);
+            omp_init_lock(_queueLocks[tid]);
+        }
+        omp_init_lock(_bestTourLock);
+    }
+
+    ~TSP() {
+        for (int tid = 0; tid < _numThreads; tid++) {
+            omp_destroy_lock(_queueLocks[tid]);
+        }
+        omp_destroy_lock(_bestTourLock);
+    }
 
     int parse_inputs(int argc, char* argv[]) {
 
@@ -212,12 +230,12 @@ public:
         return false;
     }
 
-    int visit(int visitedCities, int destiny) {
-        return visitedCities |= (1 << destiny);
+    int64_t visit(int64_t visitedCities, int destiny) {
+        return visitedCities |= static_cast<int64_t>(1 << destiny);
     }
 
-    bool hasNotVisitedCity(int visitedCities, int city) {
-        return (visitedCities &= (1 << city)) == 0;
+    bool hasNotVisitedCity(int64_t visitedCities, int city) {
+        return (visitedCities &= static_cast<int64_t>(1 << city)) == 0;
     }
 
     std::shared_ptr<tour_t> extendTour(std::shared_ptr<tour_t> tour, int destiny) {
@@ -244,29 +262,32 @@ public:
 
         std::cout << std::endl;
     }
-    
-    int existElementsInQueues() {
-        for (int thread_id = omp_get_thread_num(); thread_id < omp_get_thread_num() + omp_get_num_threads(); thread_id++) {
-            if (queues.size() != 0) return thread_id % omp_get_num_threads();
+
+    int existElementsInQueues(std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> queues) {
+        for (int thread_id = omp_get_thread_num(); thread_id < omp_get_thread_num() + _numThreads; thread_id++) {
+            if (queues.size() != 0) return thread_id % _numThreads;
         }
         return -1;
     }
 
+
     void findSolution() {
         //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
         // Initialize Branch and Bound
-        std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
-        double initial_lb = computeInitialLowerBound();
-        std::vector<PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>> queue;
-        for (int tid = 0; tid < omp_get_num_threads(); tid++) {
-            queue.push_back()
+# pragma omp master 
+        {
+            std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
         }
-        PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound> queue;
-        queue[0].push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
+        double initial_lb = computeInitialLowerBound();
+# pragma omp barrier 
 
+        int idx;
         // Branch and Bound main loop
-        while ((int idx = existElementsInQueues()) != -1) {
-            std::shared_ptr<VisitedCity> city = queue[idx].pop();
+        while ((idx = existElementsInQueues(_queues)) != -1) {
+
+            omp_set_lock(_queueLocks[idx]);
+            std::shared_ptr<VisitedCity> city = _queues[idx].pop();
+            omp_unset_lock(_queueLocks[idx]);
             std::shared_ptr<tour_t> currentTour = city->getTour();
             double tourCost = city->getCost();
             double bound = city->getLB();
@@ -284,9 +305,10 @@ public:
                 return;
             }
 
-            
             if (length == _numberOfCities) {
                 double costUntilEnd = tourCost + _roadsCost[node][0];
+
+                omp_set_lock(_bestTourLock);
                 if (costUntilEnd < _bestTourCost) {
                     if (!_bestTour) {
                         _bestTour = std::make_shared<tour_t>();
@@ -298,6 +320,7 @@ public:
                     //showTour(_bestTour);
                     //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
                 }
+                omp_unset_lock(_bestTourLock);
             }
             else {
                 for (const int& destiny : _citiesNeighbors[node]) {
@@ -305,11 +328,14 @@ public:
                         double cost = _roadsCost[node][destiny];
                         double newBound = newLowerBound(node, destiny, bound, cost);
                         if (newBound > _bestTourCost) continue;
-                        queue.push(std::make_shared<VisitedCity>(extendTour(currentTour, destiny), tourCost + cost, newBound, length + 1));
+                        std::shared_ptr<tour_t> newTour = extendTour(currentTour, destiny);
+                        omp_set_lock(_queueLocks[omp_get_thread_num()]);
+                        _queues[omp_get_thread_num()].push(std::make_shared<VisitedCity>(newTour, tourCost + cost, newBound, length + 1));
+                        omp_unset_lock(_queueLocks[omp_get_thread_num()]);
                     }
                 }
             }
-            
+
         }
     }
 };
@@ -321,7 +347,10 @@ int main(int argc, char* argv[]) {
     if (tsp.parse_inputs(argc, argv)) return 1;
     exec_time = -omp_get_wtime();
 
-    tsp.findSolution();
+#pragma omp parallel num_threads(4) 
+    {
+        tsp.findSolution();
+    }
 
     exec_time += omp_get_wtime();
 

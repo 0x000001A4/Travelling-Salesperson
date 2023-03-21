@@ -102,6 +102,7 @@ class PriorityQueue
 		}
 		
 		// Insert a new element using the copy semantics. This routine automatically sorts the queue
+
 		void push(const T& new_element)
 		{
 			// Insert the new_element at the end of the buffer
