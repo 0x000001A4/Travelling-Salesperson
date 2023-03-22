@@ -251,14 +251,26 @@ public:
         std::cout << std::endl;
     }
 
+    int getQueueWithMostElements(int tid, int numThreads) {
+        int maxElements = 0;
+        int maxQueue = 0;
+        for (int thread_id = tid + 1; thread_id < tid + numThreads; thread_id++) {
+            int queue = thread_id % numThreads;
+            int size = _queues[queue].size();
+            if (size > maxElements) {
+                maxElements = size;
+                maxQueue = queue;
+            }
+        }
+        if (maxElements == 0 && _bestTourCost != std::numeric_limits<double>::infinity()) return -1;
+        return maxQueue;
+    }
+
     int existElementsInQueues() {
         int _tid = omp_get_thread_num();
         int numThreads = omp_get_num_threads();
-        for (int thread_id = _tid; thread_id < _tid + numThreads; thread_id++) {
-            if (_queues[thread_id % numThreads].size() > 0) return thread_id % numThreads;
-        }
-        if (_bestTourCost != std::numeric_limits<double>::infinity()) return -1;
-        return 0;
+        if (_queues[_tid].size() == 0) return getQueueWithMostElements(_tid, numThreads);
+        return _tid;
     }
 
 
@@ -279,14 +291,13 @@ public:
             }
 
             int idx;
-            bool stop = false;
             // Branch and Bound main loop
             while ((idx = existElementsInQueues()) != -1) {
-                if (stop) break;
 
                 omp_set_lock(_queueLocks[idx]);
                 std::shared_ptr<VisitedCity> city = _queues[idx].pop();
                 omp_unset_lock(_queueLocks[idx]);
+
                 if (!city) continue;
                 std::shared_ptr<tour_t> currentTour = city->getTour();
                 double tourCost = city->getCost();
@@ -296,9 +307,9 @@ public:
                 int _tid = omp_get_thread_num();
 
                 if (bound >= _bestTourCost) {
-                    omp_set_lock(_queueLocks[_tid]);
-                    _queues[_tid] = PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
-                    omp_unset_lock(_queueLocks[_tid]);
+                    omp_set_lock(_queueLocks[idx]);
+                    _queues[idx] = PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
+                    omp_unset_lock(_queueLocks[idx]);
                     continue;
                 }
 
@@ -356,8 +367,7 @@ int main(int argc, char* argv[]) {
     TSP tsp = TSP();
     if (tsp.parse_inputs(argc, argv)) return 1;
     exec_time = -omp_get_wtime();
-
-    omp_set_num_threads(4);
+    omp_set_num_threads(12);
     tsp.findSolution();
 
     exec_time += omp_get_wtime();

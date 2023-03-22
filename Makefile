@@ -1,6 +1,6 @@
 IDIR = nqueue
 CC = g++
-CFLAGS = -I $(IDIR) -O3 -fopenmp
+CFLAGS = -I $(IDIR) -O3 -fopenmp -g
 SRC_DIR = .
 
 # List all of the object files that need to be compiled
