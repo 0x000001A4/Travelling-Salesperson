@@ -10,6 +10,7 @@
 #include <memory>
 #include <stack>
 #include "queue.hpp"
+#include <list>
 
 // MPI comm tags
 #define NODEREQ_T 1
@@ -17,7 +18,7 @@
 # define BESTTOURCOST_T 3
 // process state flags
 #define TERMINATED 1
-#define NOT_TERMINATED_YET 0
+#define NOT_TERMINATED 0
 
 #define MINIMUM_NODE_THREASHOLD_REQ 1
 
@@ -98,30 +99,33 @@ public:
     int NODE_REQUEST_SIZE;
 
     // Mpi Request structures
-    std::vector<MPI_Request> sendNodeReturn, recvNodeRequest, recvNodeReturn, recvBestTourCost;
-    MPI_Request bcastNodeRequest;
+    std::vector<MPI_Request> sendNodeRequest, sendNodeReturn, sendBestTourCost;
+    std::vector<MPI_Request> recvNodeRequest, recvNodeReturn, recvBestTourCost;
     // Buffers
     std::vector<node_request*> sendNodeBuffer, recvNodeBuffer;
-    double bcast_bestTourCostBuffer, recv_bestTourCostBuffer;
+    double * bestTourCostBuffer, * recv_bestTourCostBuffer;
 
 
     void initMPICommunication(int pid, int number_of_processes) {
         _numberOfProcesses = number_of_processes;
         _pid = pid;
-        processes_state.resize(number_of_processes, NOT_TERMINATED_YET);
+        processes_state.resize(number_of_processes, NOT_TERMINATED);
         NODE_REQUEST_SIZE = sizeof(node_request) + (_numberOfCities - 1) * sizeof(int);
         sendNodeBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
         recvNodeBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
-        sendNodeReturn_req.resize(number_of_processes);
-        recvNodeRequest_req.resize(number_of_processes);
-        recvNodeReturn_req.resize(number_of_processes);
-        MPI_Bcast_init(nullptr, 0, MPI_BYTE, pid, NODEREQ_T, MPI_COMM_WORLD, &bcastNodeRequest);
-        MPI_Bcast_init(&bcast_bestTourCostBuffer, sizeof(double), MPI_DOUBLE, pid, BESTTOURCOST_T, MPI_COMM_WORLD, &bcastBestTourCost);
+        sendNodeRequest.resize(number_of_processes);
+        sendNodeReturn.resize(number_of_processes);
+        sendBestTourCost.resize(number_of_processes);
+        recvNodeRequest.resize(number_of_processes);
+        recvNodeReturn.resize(number_of_processes);
+        recvBestTourCost.resize(number_of_processes);
         for (int i = 0; i < number_of_processes; i++) {
-            MPI_Send_init(sendNodeBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &sendNodeReturn[i]); // Send nodes to other replicas when they ask
+            MPI_Send_init(nullptr, 0, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &sendNodeRequest[i]);
+            MPI_Send_init(sendNodeBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &sendNodeReturn[i]);
+            MPI_Send_init(bestTourCostBuffer, sizeof(double), MPI_DOUBLE, pid, BESTTOURCOST_T, MPI_COMM_WORLD, &sendBestTourCost[i]);
             
             MPI_Recv_init(nullptr, 0, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &recvNodeRequest[i]);
-            MPI_Start(&recvNodeRequest[i])
+            MPI_Start(&recvNodeRequest[i]);
             
             MPI_Recv_init(recvNodeBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &recvNodeReturn[i]);
             MPI_Start(&recvNodeReturn[i]);
@@ -131,14 +135,24 @@ public:
         }
     }
 
+    void broadcast(std::vector<MPI_Request>& requestObj) {
+        for (int i = 0; i < _numberOfProcesses; i++) {
+            if (_pid == i) continue;
+            // attention lack of & before requestObj on start because of & in parameters
+            MPI_Start(&requestObj[i]);
+        }
+        MPI_Waitall(_numberOfProcesses, requestObj.data(), nullptr);
+    }
+
     void destroyMPICommunication(int number_of_processes) {
         for (int i = 0; i < number_of_processes; i++) {
             MPI_Request_free(&sendNodeReturn[i]);
+            MPI_Request_free(&sendNodeRequest[i]);
+            MPI_Request_free(&sendBestTourCost[i]);
             MPI_Request_free(&recvNodeRequest[i]);
             MPI_Request_free(&recvNodeReturn[i]);
             MPI_Request_free(&recvBestTourCost[i]);
         }
-        MPI_Request_free(&bcastNodeRequest);
     }
  
     int parse_inputs(int argc, char* argv[]) {
@@ -282,6 +296,14 @@ public:
         return false;
     }
 
+    void mark_as_terminated(int id) {
+        processes_state[id] = TERMINATED;
+    }
+
+    void revoke_terminated(int id) {
+        processes_state[id] = NOT_TERMINATED;
+    }
+
     int visit(int visitedCities, int destiny) {
         return visitedCities |= (1 << destiny);
     }
@@ -289,6 +311,7 @@ public:
     bool hasNotVisitedCity(int visitedCities, int city) {
         return (visitedCities &= (1 << city)) == 0;
     }
+
 
     std::shared_ptr<tour_t> extendTour(std::shared_ptr<tour_t> tour, int destiny) {
         std::shared_ptr<tour_t> newTour = std::make_shared<tour_t>();
@@ -303,88 +326,113 @@ public:
         std::shared_ptr<tour_t> newTour = nullptr;
         for (int node = 0; node < _numberOfCities; node++) {
             if (node_request_object->tour[node] == -1) break;
-            newTour = extendTour(newTour, node_request_object->tour[node])
+            newTour = extendTour(newTour, node_request_object->tour[node]);
         }
         queue.push(std::make_shared<VisitedCity>(newTour, node_request_object->cost, node_request_object->lowerBound, node_request_object->length));
+        revoke_terminated(_pid);
     }
 
     void mpi_testRecvNodeReturn() {
-        MPI_Status[_numberOfProcesses] status;
-        MPI_Testall(_numberOfProcesses, recvNodeReturn.data(), nullptr, &status);
+        MPI_Status status[_numberOfProcesses];
+        MPI_Testall(_numberOfProcesses, recvNodeReturn.data(), nullptr, status);
         for (int i = 0; i < _numberOfProcesses; i++) {
             if (status[i].MPI_ERROR != MPI_SUCCESS) {
                 printf("Request %d failed with error code %d\n", i, status[i].MPI_ERROR);
                 continue;
             }
-            int senderPID = status[i].MPI_SENDER;
-            node_request* node_request_object = recvNodeBuffer[senderPID];
-            if (node_request_object->terminated == 0) {
-                processes_state[senderPID] = TERMINATED;
+            int senderPid = status[i].MPI_SOURCE;
+            node_request* node_request_object = recvNodeBuffer[senderPid];
+            if (node_request_object->terminated == TERMINATED) {
+                mark_as_terminated(senderPid);
             } else {
-                addNodeToQueue(queue, node_request_object);
-                processes_state[senderPID] = NOT_TERMINATED_YET;
+                addNodeToQueue(node_request_object);
+                delete node_request_object;
+                revoke_terminated(senderPid);
             }
+            MPI_Start(&recvNodeReturn[senderPid]);
         }
     }
 
 
     void mpi_testRecvBestTourCost() {
-        MPI_Status[_numberOfProcesses] status;
-        MPI_Testall(_numberOfProcesses, recvBestTourCost.data(), nullptr, &status);
+        MPI_Status status[_numberOfProcesses];
+        MPI_Testall(_numberOfProcesses, recvBestTourCost.data(), nullptr, status);
         for (int i = 0; i < _numberOfProcesses; i++) {
             if (status[i].MPI_ERROR != MPI_SUCCESS) {
                 printf("Request %d failed with error code %d\n", i, status[i].MPI_ERROR);
                 continue;
             }
-            int senderPID = status[i].MPI_SENDER;
-            double newBestTourCost = recv_bestTourCostBuffer[senderPID];
+            int senderPid = status[i].MPI_SOURCE;
+            double newBestTourCost = recv_bestTourCostBuffer[senderPid];
             if (_bestTourCost < newBestTourCost) {
                 _bestTourCost = newBestTourCost;
             }
+            MPI_Start(&recvBestTourCost[senderPid]);
         }
     }
 
+    void handleRecvNodeRequest(int senderPid) {
+        int queueSize = queue.size();
+        if (queueSize > 0 && queueSize < 3) return;
+
+        std::shared_ptr<node_request> node_request_object = std::make_shared<node_request>();
+        if (queueSize == 0) node_request_object->terminated = TERMINATED;
+        else {
+            node_request_object->terminated = NOT_TERMINATED;
+            std::shared_ptr<VisitedCity> city = queue.pop();
+            node_request_object->cost = city->getCost();
+            node_request_object->lowerBound = city->getLB();
+
+            std::fill(node_request_object->tour, node_request_object->tour + _numberOfCities, -1);
+            std::shared_ptr<tour_t> tour = city->getTour();
+            for (int i = 0; i < city->getLength(); i++) {
+                node_request_object->tour[city->getLength() - i] = static_cast<short>(tour->node);
+                tour = tour->prev;
+            }
+        }
+        sendNodeBuffer[senderPid] = node_request_object.get();
+        node_request_object = nullptr;
+        MPI_Start(&sendNodeReturn[senderPid]);
+    }
+
     void mpi_testRecvNodeRequest() {
-        if (queue.size() == 0) {
-            // send terminated status back
-        } else if (queue.size() >= 3) {
-           // send back a VisitedCity from the queue  
+        MPI_Status status[_numberOfProcesses];
+        MPI_Testall(_numberOfProcesses, recvNodeRequest.data(), nullptr, status);
+        for (int i = 0; i < _numberOfProcesses; i++) {
+            if (status[i].MPI_ERROR != MPI_SUCCESS) {
+                printf("Request %d failed with error code %d\n", i, status[i].MPI_ERROR);
+                continue;
+            }
+            int senderPid = status[i].MPI_SOURCE;
+            handleRecvNodeRequest(senderPid);
+            MPI_Start(&recvNodeRequest[senderPid]);
         }
     }
 
 
     void findSolution() {
-        //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
-        // Initialize Branch and Bound
-        std::shared_ptr<tour_t> tour = extendTour(nullptr, 0);
-        double initial_lb = computeInitialLowerBound();
-        queue.push(std::make_shared<VisitedCity>(tour, 0, initial_lb, 1));
-
-        std::shared_ptr<VisitedCity> city;
-        double tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
-        int length, node;
-        bool sentBestTourCost = false;
+        std::shared_ptr<tour_t> tour;
+        if (_pid == 1) {
+            queue.push(std::make_shared<VisitedCity>(extendTour(nullptr, 0), 0, computeInitialLowerBound(), 1));
+        }
 
         // Branch and Bound main loop
-        while (std::any_of(processes_state.begin(), processes_state.end(), [](short state){ 
-            return state == NOT_TERMINATED_YET; // termination condition
-        })){
-            mpi_testRecvNodeRequest();
+        while (std::any_of(processes_state.begin(), processes_state.end(), [](short state) { return state == NOT_TERMINATED; })) {
             if (queue.empty()) {
-                mark_as_terminated(pid);
+                mark_as_terminated(_pid);
                 mpi_testRecvNodeReturn();
                 // Continue (while receiving messages and updating process_state)
             } else {
                 if (queue.size() == MINIMUM_NODE_THREASHOLD_REQ) {
                     // no need to set buffer (nullptr)
-                    MPI_Start(&bcastRequestNode);
+                    broadcast(sendNodeRequest);
                 }
-                city = queue.pop();
+                std::shared_ptr<VisitedCity> city = queue.pop();
                 tour = city->getTour();
-                tourCost = city->getCost();
-                bound = city->getLB();
-                length = city->getLength();
-                node = tour->node;
+                double tourCost = city->getCost();
+                double bound = city->getLB();
+                int length = city->getLength();
+                int node = tour->node;
 
                 //std::cout << ".. Visiting new city in the context of tour: (";
                 //showTour(city->getTour());
@@ -397,13 +445,13 @@ public:
                 if (bound >= _bestTourCost) {
                     queue = PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
                     // no need to set buffer (nullptr)
-                    MPI_Start(&bcastRequestNode);
+                    broadcast(sendNodeRequest);
                     continue;
                 }
 
                 
                 if (length == _numberOfCities) {
-                    costUntilEnd = tourCost + _roadsCost[node][0];
+                    double costUntilEnd = tourCost + _roadsCost[node][0];
                     if (costUntilEnd < _bestTourCost) {
                         if (!_bestTour) {
                             _bestTour = std::make_shared<tour_t>();
@@ -411,16 +459,8 @@ public:
                         }
                         _bestTour->prev = tour;
                         _bestTourCost = costUntilEnd;
-
-                        /* Might change to synchronous broadcast */
-                        if (sentBestTourCost) {
-                            MPI_Wait(&bcastBestTourCost);
-                            bestTourCostBuffer = _bestTourCost;
-                            sentBestTourCost = false;
-                        }
-
-                        MPI_Start(&bcastBestTourCost);
-                        sentBestTourCost = true;
+                        *bestTourCostBuffer = _bestTourCost;
+                        broadcast(sendBestTourCost);
                         //std::cout << "!! Tour complete: ";
                         //showTour(_bestTour);
                         //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
@@ -429,25 +469,17 @@ public:
                 else {
                     for (const int& destiny : _citiesNeighbors[node]) {
                         if (hasNotVisitedCity(tour->visitedCities, destiny)) {
-                            cost = _roadsCost[node][destiny];
-                            newBound = newLowerBound(node, destiny, bound, cost);
+                            double cost = _roadsCost[node][destiny];
+                            double newBound = newLowerBound(node, destiny, bound, cost);
                             if (newBound > _bestTourCost) continue;
                             queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
                         }
                     }
+                    mpi_testRecvNodeRequest();
                 }
             }
-            }
         }
-    }
-
-    void mark_as_terminated(int id) {
-        processes_state[id] = TERMINATED;
-    }
-
-    void revoke_terminated(int id) {
-        processes_state[id] = NOT_TERMINATED_YET;
-    }
+    };
 };
 
 
