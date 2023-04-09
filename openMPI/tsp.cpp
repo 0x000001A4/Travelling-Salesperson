@@ -3,13 +3,15 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include <omp.h>
+#include <mpi.h>
 #include <sstream>
 #include <algorithm>
 #include <limits>
 #include <memory>
 #include <stack>
 #include "queue.hpp"
+
+#define NODEREQ_T 420
 
 struct tour_t {
     int node;
@@ -24,8 +26,9 @@ public:
     double _lowerBound;
     int _length;
 
-    virtual ~VisitedCity() = default;
     VisitedCity() = default;
+
+    virtual ~VisitedCity() = default;
 
     struct CompareCityByLowerBound {
         bool operator()(const std::shared_ptr<VisitedCity>& a, const std::shared_ptr<VisitedCity>& b) {
@@ -71,6 +74,37 @@ public:
     TSP() = default;
     virtual ~TSP() = default;
 
+    // Communication
+    typedef struct {
+        short terminated;
+        double visitedCities;
+        short tour[1];
+    } node_request;
+
+    std::vector<node_request> sendReqsBuffer, recvReqsBuffer;
+    std::vector<MPI_Request> send_req, recv_req;
+    int NODE_REQUEST_SIZE;
+
+    void initMPICommunication(int number_of_processes) {
+        NODE_REQUEST_SIZE = sizeof(node_request) + (_numberOfCities - 1) * sizeof(int);
+        sendReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE])
+        recvReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE])
+        send_req.resize(number_of_processes)
+        recv_req.resize(number_of_processes)
+        for (int i = 0; i < number_of_processes; i++)
+            MPI_Send_init(sendReqsBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &send_req[i]);
+            MPI_Recv_init(recvReqsBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &recv_req[i]);
+        }
+    }
+
+    void destroyMPICommunication(int number_of_processes) {
+        for (int i = 0; i < number_of_processes; i++) {
+            MPI_Request_free(&recv_req[i])
+            MPI_Request_free(&send_req[i])
+        }
+    }
+        
+ 
     int parse_inputs(int argc, char* argv[]) {
 
         if (argc != 3) {
@@ -306,19 +340,33 @@ public:
     }
 };
 
+
 int main(int argc, char* argv[]) {
 
-    double exec_time;
+    double elapsed_time;
+
+    int pid, number_of_processes;
+    MPI_INIT(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &number_of_processes);
+    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+
     TSP tsp = TSP();
     if (tsp.parse_inputs(argc, argv)) return 1;
-    exec_time = -omp_get_wtime();
+    tsp.initMPICommunication(number_of_processes);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    elapsed_time = -MPI_Wtime();
     tsp.findSolution();
+    elapsed_time += MPI_Wtime();
 
-    exec_time += omp_get_wtime();
+    tsp.destroyMPICommunication(number_of_processes);
 
-    //std::cout << "----- RESULTS ------" << std::endl;
-    //fprintf(stderr, "Time of execution: %.6fs\n", exec_time);
+    std::cout << "----- RESULTS ------" << std::endl;
+    fprintf(stderr, "Time of execution: %.6fs\n", elapsed_time);
     tsp.print_result();
+
+    // Attention! please 
+    MPI_Finalize();
+
     return 0;
 }
