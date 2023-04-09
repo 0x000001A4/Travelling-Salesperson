@@ -11,7 +11,13 @@
 #include <stack>
 #include "queue.hpp"
 
+// MPI comm tags
 #define NODEREQ_T 420
+// process state flags
+#define TERMINATED 1
+#define NOT_TERMINATED_YET 0
+
+#define MINIMUM_NODE_THREASHOLD_REQ 1
 
 struct tour_t {
     int node;
@@ -81,17 +87,20 @@ public:
         short tour[1];
     } node_request;
 
-    std::vector<node_request> sendReqsBuffer, recvReqsBuffer;
+    std::vector<short> processes_state;
+    std::vector<node_request*> sendReqsBuffer, recvReqsBuffer;
     std::vector<MPI_Request> send_req, recv_req;
     int NODE_REQUEST_SIZE;
+    int pid;
 
-    void initMPICommunication(int number_of_processes) {
+    void initMPICommunication(int pid, int number_of_processes) {
+        processes_state.resize(number_of_processes, NOT_TERMINATED_YET);
         NODE_REQUEST_SIZE = sizeof(node_request) + (_numberOfCities - 1) * sizeof(int);
-        sendReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE])
-        recvReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE])
-        send_req.resize(number_of_processes)
-        recv_req.resize(number_of_processes)
-        for (int i = 0; i < number_of_processes; i++)
+        sendReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
+        recvReqsBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
+        send_req.resize(number_of_processes);
+        recv_req.resize(number_of_processes);
+        for (int i = 0; i < number_of_processes; i++) {
             MPI_Send_init(sendReqsBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &send_req[i]);
             MPI_Recv_init(recvReqsBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &recv_req[i]);
         }
@@ -99,8 +108,8 @@ public:
 
     void destroyMPICommunication(int number_of_processes) {
         for (int i = 0; i < number_of_processes; i++) {
-            MPI_Request_free(&recv_req[i])
-            MPI_Request_free(&send_req[i])
+            MPI_Request_free(&recv_req[i]);
+            MPI_Request_free(&send_req[i]);
         }
     }
         
@@ -262,23 +271,6 @@ public:
         return newTour;
     }
 
-    void printBits(int num) {
-        // Determine the number of bits needed to represent the integer
-        int numBits = sizeof(num) * 8;
-
-        // Create a mask to extract each bit from the integer
-        unsigned int mask = 1u << (numBits - 1);
-
-        // Loop through each bit and print it as 0 or 1
-        for (int i = 0; i < numBits; i++) {
-            int bit = (num & mask) ? 1 : 0;
-            std::cout << bit;
-            mask >>= 1;
-        }
-
-        std::cout << std::endl;
-    }
-
     void findSolution() {
         //std::cout << "------ BRANCH AND BOUND ------" << std::endl;
         // Initialize Branch and Bound
@@ -291,52 +283,71 @@ public:
         double tourCost, bound, costUntilEnd, cost, newBound, newTourCost;
         int length, node;
         // Branch and Bound main loop
-        while (!queue.empty()) {
-            city = queue.pop();
-            tour = city->getTour();
-            tourCost = city->getCost();
-            bound = city->getLB();
-            length = city->getLength();
-            node = tour->node;
-
-            //std::cout << ".. Visiting new city in the context of tour: (";
-            //showTour(city->getTour());
-            //std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
-            //    "; Lower-bound: " << bound << "; Length: " << length << "; Visited cities: ";
-            //printBits(tour->visitedCities);
-            //std::cout << std::endl;
-
-            if (bound >= _bestTourCost) {
-                return;
-            }
-
-            
-            if (length == _numberOfCities) {
-                costUntilEnd = tourCost + _roadsCost[node][0];
-                if (costUntilEnd < _bestTourCost) {
-                    if (!_bestTour) {
-                        _bestTour = std::make_shared<tour_t>();
-                        _bestTour->node = 0;
-                    }
-                    _bestTour->prev = tour;
-                    _bestTourCost = costUntilEnd;
-                    //std::cout << "!! Tour complete: ";
-                    //showTour(_bestTour);
-                    //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
+        while (std::any_of(processes_state.begin(), processes_state.end(), [](short state){ 
+            return state == NOT_TERMINATED_YET; // termination condition
+        })){
+            if (!queue.empty()) {
+                if (queue.size() == MINIMUM_NODE_THREASHOLD_REQ) {
+                    // perform request nodes
                 }
+                city = queue.pop();
+                tour = city->getTour();
+                tourCost = city->getCost();
+                bound = city->getLB();
+                length = city->getLength();
+                node = tour->node;
+
+                //std::cout << ".. Visiting new city in the context of tour: (";
+                //showTour(city->getTour());
+                //std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
+                //    "; Lower-bound: " << bound << "; Length: " << length << "; Visited cities: ";
+                //printBits(tour->visitedCities);
+                //std::cout << std::endl;
+
+                if (bound >= _bestTourCost) {
+                    return;
+                }
+
+                
+                if (length == _numberOfCities) {
+                    costUntilEnd = tourCost + _roadsCost[node][0];
+                    if (costUntilEnd < _bestTourCost) {
+                        if (!_bestTour) {
+                            _bestTour = std::make_shared<tour_t>();
+                            _bestTour->node = 0;
+                        }
+                        _bestTour->prev = tour;
+                        _bestTourCost = costUntilEnd;
+                        //std::cout << "!! Tour complete: ";
+                        //showTour(_bestTour);
+                        //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
+                    }
+                }
+                else {
+                    for (const int& destiny : _citiesNeighbors[node]) {
+                        if (hasNotVisitedCity(tour->visitedCities, destiny)) {
+                            cost = _roadsCost[node][destiny];
+                            newBound = newLowerBound(node, destiny, bound, cost);
+                            if (newBound > _bestTourCost) continue;
+                            queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
+                        }
+                    }
+                }
+                
             }
             else {
-                for (const int& destiny : _citiesNeighbors[node]) {
-                    if (hasNotVisitedCity(tour->visitedCities, destiny)) {
-                        cost = _roadsCost[node][destiny];
-                        newBound = newLowerBound(node, destiny, bound, cost);
-                        if (newBound > _bestTourCost) continue;
-                        queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
-                    }
-                }
+                mark_as_terminated(pid);
+                // wait for requests
             }
-            
         }
+    }
+
+    void mark_as_terminated(int id) {
+        processes_state[id] = TERMINATED;
+    }
+
+    void revoke_terminated(int id) {
+        processes_state[id] = NOT_TERMINATED_YET;
     }
 };
 
@@ -346,13 +357,13 @@ int main(int argc, char* argv[]) {
     double elapsed_time;
 
     int pid, number_of_processes;
-    MPI_INIT(&argc, &argv);
+    MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &number_of_processes);
     MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
     TSP tsp = TSP();
     if (tsp.parse_inputs(argc, argv)) return 1;
-    tsp.initMPICommunication(number_of_processes);
+    tsp.initMPICommunication(pid, number_of_processes);
 
     MPI_Barrier(MPI_COMM_WORLD);
     elapsed_time = -MPI_Wtime();
