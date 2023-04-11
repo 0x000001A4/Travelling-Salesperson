@@ -107,10 +107,15 @@ public:
     std::vector<MPI_Request> recvNodeRequest, recvNodeReturn, recvBestTourCost;
     // Buffers
     std::vector<node_request*> sendNodeBuffer, recvNodeBuffer;
+    char *sendNodeBuffer_m, *recvNodeBuffer_m;
+
     std::vector<double> recv_bestTourCostBuffer;
     double bestTourCostBuffer;
     char* sendNodeRequestBuffer = new char[1], *recvNodeRequestBuffer = new char[1];
 
+    node_request* getNodeReqFromByteArray(char* array, int index) {
+        return (node_request*)(array + index * NODE_REQUEST_SIZE);
+    }
 
     void initMPICommunication(int pid, int number_of_processes) {
         _numberOfProcesses = number_of_processes;
@@ -121,6 +126,9 @@ public:
         finalBestTourInfo->cost = std::numeric_limits<double>::infinity();
         sendNodeBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
         recvNodeBuffer.resize(number_of_processes, (node_request*) new char[NODE_REQUEST_SIZE]);
+        sendNodeBuffer_m = (char*) malloc(NODE_REQUEST_SIZE * _numberOfProcesses);
+        recvNodeBuffer_m = (char*) malloc(NODE_REQUEST_SIZE * _numberOfProcesses);
+
         sendNodeRequest.resize(number_of_processes);
         sendNodeReturn.resize(number_of_processes);
         sendBestTourCost.resize(number_of_processes);
@@ -131,13 +139,13 @@ public:
         for (int i = 0; i < number_of_processes; i++) {
             MPI_Send_init(sendNodeRequestBuffer, 1, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &sendNodeRequest[i]);
 
-            MPI_Send_init(sendNodeBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &sendNodeReturn[i]);
+            MPI_Send_init(getNodeReqFromByteArray(sendNodeBuffer_m, i), NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &sendNodeReturn[i]);
             MPI_Send_init(&bestTourCostBuffer, 1, MPI_DOUBLE, i, BESTTOURCOST_T, MPI_COMM_WORLD, &sendBestTourCost[i]);
             
             MPI_Recv_init(recvNodeRequestBuffer, 1, MPI_BYTE, i, NODEREQ_T, MPI_COMM_WORLD, &recvNodeRequest[i]);
             MPI_Start(&recvNodeRequest[i]);
             
-            MPI_Recv_init(recvNodeBuffer[i], NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &recvNodeReturn[i]);
+            MPI_Recv_init(getNodeReqFromByteArray(recvNodeBuffer_m, i), NODE_REQUEST_SIZE, MPI_BYTE, i, NODERET_T, MPI_COMM_WORLD, &recvNodeReturn[i]);
             MPI_Start(&recvNodeReturn[i]);
             
             MPI_Recv_init(&recv_bestTourCostBuffer[i], 1, MPI_DOUBLE, i, BESTTOURCOST_T, MPI_COMM_WORLD, &recvBestTourCost[i]);
@@ -341,11 +349,14 @@ public:
             if (finished) {
                 std::cout << _pid << " received request from " << i << " with MPI-SOURCE = " << status.MPI_SOURCE  << std::endl;
                 int senderPid = status.MPI_SOURCE;
-                node_request* node_request_object = recvNodeBuffer[senderPid];
+                std::cout << _pid << " Flag Is1 " << getNodeReqFromByteArray(recvNodeBuffer_m, senderPid)->terminated  << std::endl;
+                node_request* node_request_object = getNodeReqFromByteArray(recvNodeBuffer_m, senderPid);
                 if (node_request_object->terminated) {
+                    std::cout << _pid << " ENDDD  "<< std::endl;
                     mark_as_terminated(senderPid);
                 }
                 else {
+                    std::cout << _pid << " NOT ENDD -> Flag Is2: " << node_request_object->terminated << std::endl;
                     addNodeToQueue(node_request_object);
                     revoke_terminated(senderPid);
                 }
@@ -389,7 +400,7 @@ public:
             std::cout << _pid << " dont have enough nodes to send to " << destPid << std::endl;
             return;
         }
-        std::shared_ptr<node_request> node_request_object = std::make_shared<node_request>();
+        node_request* node_request_object = getNodeReqFromByteArray(sendNodeBuffer_m, destPid);
         if (queueSize == 0) node_request_object->terminated = TERMINATED;
         else {
             std::shared_ptr<VisitedCity> city = queue.pop();
@@ -398,10 +409,9 @@ public:
             std::cout << _pid << " city cost = " << city->getCost() << std::endl;
             std::cout << _pid << " node cost = " << node_request_object->cost << std::endl;
             node_request_object->lowerBound = city->getLB();
-            copyTourIntoNodeRequest(node_request_object.get(), city->getTour(), city->getLength());
+            copyTourIntoNodeRequest(node_request_object, city->getTour(), city->getLength());
         }
-        sendNodeBuffer[destPid] = node_request_object.get();
-        node_request_object = nullptr;
+        std::cout << _pid << " Sending flag as " << node_request_object->terminated << std::endl;
         MPI_Wait(&sendNodeReturn[destPid], &status); // must wait before issuing next send
         MPI_Start(&sendNodeReturn[destPid]);
     }
