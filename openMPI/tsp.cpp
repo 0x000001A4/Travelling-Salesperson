@@ -11,6 +11,7 @@
 #include <stack>
 #include "queue.hpp"
 #include <list>
+#include <unistd.h>
 
 // MPI comm tags
 #define NODEREQ_T 1
@@ -276,7 +277,6 @@ public:
     double newLowerBound(int origin, int destiny, double LB, double cost) {
         double cf = cost >= _minPairs[origin].second ? _minPairs[origin].second : _minPairs[origin].first;
         double ct = cost >= _minPairs[destiny].second ? _minPairs[destiny].second : _minPairs[destiny].first;
-        //std::cout << "LB: " << LB << " cost: " << cost << " " << "cf: " << cf << " ct: " << ct << std::endl;
         return LB + cost - (cf + ct) / 2;
     }
 
@@ -340,6 +340,7 @@ public:
     void addNodeToQueue(node_request * node_request_object) {
         std::shared_ptr<tour_t> newTour = nullptr;
         for (int node = 0; node < _numberOfCities; node++) {
+            std::cout << _pid << " running over the tour " << node_request_object->tour[node] << std::endl; 
             if (node_request_object->tour[node] == -1) break;
             newTour = extendTour(newTour, node_request_object->tour[node]);
         }
@@ -486,7 +487,7 @@ public:
         std::shared_ptr<tour_t> tour;
         if (_pid == 0) {
             queue.push(std::make_shared<VisitedCity>(extendTour(nullptr, 0), 0, computeInitialLowerBound(), 1));
-        }
+        }else computeInitialLowerBound();
 
         // Branch and Bound main loop
         while (std::any_of(processes_state.begin(), processes_state.end(), [](short state) { return state == NOT_TERMINATED; })) {
@@ -504,7 +505,7 @@ public:
 
                 mpi_testRecvNodeRequest();
                 mpi_testRecvBestTourCost();
-
+                std::cout << _pid << " queue size " << queue.size() << std::endl;
                 std::shared_ptr<VisitedCity> city = queue.pop();
                 tour = city->getTour();
                 double tourCost = city->getCost();
@@ -548,9 +549,14 @@ public:
                     }
                 }
                 else {
+                        std::cout << _pid << " neigbors of node " << node << std::endl;
                     for (const int& destiny : _citiesNeighbors[node]) {
+                        std::cout << _pid << " traversing neighbor " << destiny << std::endl;
                         if (hasNotVisitedCity(tour->visitedCities, destiny)) {
+                            std::cout << _pid << " has not visited " << destiny << std::endl;
+
                             double cost = _roadsCost[node][destiny];
+                            std::cout << _pid << " node: " << node << std::endl;
                             double newBound = newLowerBound(node, destiny, bound, cost);
                             if (newBound > _bestTourCost) continue;
                             queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
@@ -567,7 +573,7 @@ public:
 
 
 int main(int argc, char* argv[]) {
-
+    // sleep(15);
     double elapsed_time;
 
     int pid, number_of_processes;

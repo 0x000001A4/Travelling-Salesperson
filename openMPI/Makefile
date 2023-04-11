@@ -1,6 +1,6 @@
 IDIR = nqueue
 CC = mpic++
-CFLAGS = -I $(IDIR) -O3 -fopenmp
+CFLAGS = -I $(IDIR) -g -O3
 SRC_DIR = .
 
 # List all of the object files that need to be compiled
