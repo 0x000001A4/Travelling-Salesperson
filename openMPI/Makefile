@@ -1,5 +1,5 @@
 IDIR = nqueue
-CC = g++
+CC = mpic++
 CFLAGS = -I $(IDIR) -O3 -fopenmp
 SRC_DIR = .
 
