@@ -103,6 +103,7 @@ public:
 
     node_request* finalBestTourInfo;
     std::vector<short> processes_state;
+    std::vector<short> commited_state;
     std::vector<int> recvTimestamps;
     std::vector<int> sendTimestamps;
     int NODE_REQUEST_SIZE;
@@ -128,6 +129,7 @@ public:
         _numberOfProcesses = number_of_processes;
         _pid = pid;
         processes_state.resize(number_of_processes, NOT_TERMINATED);
+        commited_state.resize(number_of_processes, NOT_TERMINATED);
         NODE_REQUEST_SIZE = sizeof(node_request) + (_numberOfCities) * sizeof(short); // tour has size n_cities + 1
         finalBestTourInfo = (node_request*) new char[NODE_REQUEST_SIZE]; // test
         finalBestTourInfo->cost = std::numeric_limits<double>::infinity();
@@ -311,15 +313,13 @@ public:
     }
 
     void mark_as_terminated(int id) {
+        commited_state[id] = processes_state[id];
         processes_state[id] = TERMINATED;
     }
 
     void revoke_terminated(int id) {
         processes_state[id] = NOT_TERMINATED;
-    }
-
-    void update_process_state(int id, int state) {
-        processes_state[id] = state;
+        commited_state[id] = processes_state[id];
     }
 
     int get_process_state() {
@@ -439,7 +439,8 @@ public:
 
     void update_state_if_new_message(int senderPid, int state, int timestamp) {
         if (timestamp > recvTimestamps[senderPid]) {
-            update_process_state(senderPid, state);
+            if (state == TERMINATED) mark_as_terminated(senderPid);
+            else revoke_terminated(senderPid);
             recvTimestamps[senderPid] = timestamp;
         }
     }
@@ -496,9 +497,10 @@ public:
             queue.push(std::make_shared<VisitedCity>(extendTour(nullptr, 0), 0, computeInitialLowerBound(), 1));
         } else computeInitialLowerBound();
 
+        int i = 0;
         // Branch and Bound main loop
-        while (std::any_of(processes_state.begin(), processes_state.end(), [](short state) { return state == NOT_TERMINATED; })) {
-
+        while (std::any_of(commited_state.begin(), commited_state.end(), [](short state) { return state == NOT_TERMINATED; })) {
+            std::cout << _pid << "  " << queue.size() << std::endl;
             if (queue.empty()) {
                 mark_as_terminated(_pid);
                 mpi_testRecvNodeRequest();
