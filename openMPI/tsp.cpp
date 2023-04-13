@@ -350,7 +350,6 @@ public:
     void addNodeToQueue(node_request * node_request_object) {
         std::shared_ptr<tour_t> newTour = nullptr;
         for (int node = 0; node < _numberOfCities; node++) {
-            std::cout << _pid << " running over the tour " << node_request_object->tour[node] << std::endl; 
             if (node_request_object->tour[node] == -1) break;
             newTour = extendTour(newTour, node_request_object->tour[node]);
         }
@@ -361,24 +360,20 @@ public:
         MPI_Status status;
         int finished;
         for (int i = 0; i < _numberOfProcesses; i++) {
+            if (i == _pid) continue;
             MPI_Test(&recvNodeReturn[i], &finished, &status);
             if (finished) {
                 int senderPid = status.MPI_SOURCE;
-                // std::cout << _pid << " Flag Is1 " << getNodeReqFromByteArray(recvNodeBuffer_m, senderPid)->terminated  << std::endl;
+                if (senderPid == _pid) continue;
                 node_request* node_request_object = getNodeReqFromByteArray(recvNodeBuffer_m, senderPid);
-                if (senderPid != _pid) {
-                    update_state_if_new_message(senderPid, node_request_object->terminated, node_request_object->timestamp);
-                    std::cout << _pid << " length=" << node_request_object->length << std::endl;
-                    std::cout << _pid << " received node " << node_request_object->tour[node_request_object->length - 1] << " with LB=" << node_request_object->lowerBound  << " from " << senderPid << std::endl;
-                    if (!node_request_object->terminated) {
-                        addNodeToQueue(node_request_object);
-                        revoke_terminated(_pid);
-                    }
+                update_state_if_new_message(senderPid, node_request_object->terminated, node_request_object->timestamp);
+                if (!node_request_object->terminated) {
+                    addNodeToQueue(node_request_object);
+                    revoke_terminated(_pid);
                 }
                 MPI_Start(&recvNodeReturn[senderPid]);
             }
         }
-
     }
 
 
@@ -386,9 +381,11 @@ public:
         MPI_Status status;
         int finished;
         for (int i = 0; i < _numberOfProcesses; i++) {
+            if (i == _pid) continue;
             MPI_Test(&recvBestTourCost[i], &finished, &status);
             if (finished) {
                 int senderPid = status.MPI_SOURCE;
+                if (senderPid == _pid) continue;
                 double newBestLowerBound = recv_bestTourCostBuffer[senderPid];
                 if (newBestLowerBound < _bestLowerBound) {
                     _bestLowerBound = newBestLowerBound;
@@ -405,32 +402,24 @@ public:
             node_request_object->tour[length - 1 - i] = static_cast<short>(tour->node);
             tour = tour->prev;
         }
-        for (int i = 0; i < length ; i++ ) {
-            std::cout << _pid << " copied node to tour before sending: " <<  node_request_object->tour[i] << std::endl;
-        }
     }
 
     void handleRecvNodeRequest(int destPid) {
         MPI_Status status;
         int queueSize = queue.size();
         if (queueSize > 0 && queueSize < NODE_LIMIT) {
-            std::cout << _pid << " dont have enough nodes to send to " << destPid << std::endl;
             return;
         }
         node_request* node_request_object = getNodeReqFromByteArray(sendNodeBuffer_m, destPid);
         node_request_object->terminated = get_process_state();
         node_request_object->timestamp = ++sendTimestamps[destPid];
-        if (get_process_state() == NOT_TERMINATED) {
+        if (queueSize > 0) {
             std::shared_ptr<VisitedCity> city = queue.pop();
             node_request_object->cost = city->getCost();
-            // std::cout << _pid << " city cost = " << city->getCost() << std::endl;
-            // std::cout << _pid << " node cost = " << node_request_object->cost << std::endl;
             node_request_object->lowerBound = city->getLB();
             node_request_object->length = city->getLength();
             copyTourIntoNodeRequest(node_request_object, city->getTour(), city->getLength());
-            std::cout << _pid << " sending node " << node_request_object->tour[city->getLength()-1] << " to" << destPid << std::endl;
         }
-        std::cout << _pid << " sending flag as " << node_request_object->terminated << " to " << destPid  << std::endl;
         MPI_Wait(&sendNodeReturn[destPid], &status); // must wait before issuing next send
         MPI_Start(&sendNodeReturn[destPid]);
     }
@@ -439,15 +428,14 @@ public:
         MPI_Status status;
         int finished;
         for (int i = 0; i < _numberOfProcesses; i++) {
+            if (i == _pid) continue;
             MPI_Test(&recvNodeRequest[i], &finished, &status);
             if (finished) {
                 int senderPid = status.MPI_SOURCE;
+                if (senderPid == _pid) continue;
                 node_request* request = getNodeReqFromByteArray(recvNodeRequestBuffer, senderPid);
-                std::cout << _pid << " received a node request from " << status.MPI_SOURCE << " with state=" << request->terminated << std::endl;
-                if (senderPid != _pid) {
-                    update_state_if_new_message(senderPid, request->terminated, request->timestamp);
-                    handleRecvNodeRequest(senderPid);
-                }
+                update_state_if_new_message(senderPid, request->terminated, request->timestamp);
+                handleRecvNodeRequest(senderPid);
                 MPI_Start(&recvNodeRequest[senderPid]);
             }
         }
@@ -461,19 +449,15 @@ public:
     }
 
     void broadcast(std::vector<MPI_Request>& requestObj) {
-        //std::cout << _pid << " broadcast start " << std::endl;
         std::vector<MPI_Status> statuses(_numberOfProcesses);
         sendNodeRequestBuffer->terminated = get_process_state();
         for (int i = 0; i < _numberOfProcesses; i++) {
-            // attention lack of & before requestObj on start because of & in parameters
+            if (i == _pid) continue;
             sendNodeRequestBuffer->timestamp = ++sendTimestamps[i];
             MPI_Start(&requestObj[i]);
-            std::cout << _pid << " sending to " << i << " with state= " << sendNodeRequestBuffer->terminated << std::endl;
         }
         int err_code = MPI_Waitall(_numberOfProcesses, requestObj.data(), statuses.data());
         if (err_code != MPI_SUCCESS) std::cout << _pid << " MPI_Waitall error " << std::endl;
-        
-        //std::cout << _pid << " broadcast end" << std::endl;
     }
 
     void mpi_shareBestToursAndDecideBest() {
@@ -492,12 +476,14 @@ public:
         MPI_Gather((char*) finalBestTourInfo, NODE_REQUEST_SIZE, MPI_BYTE, recvBuffer,
             NODE_REQUEST_SIZE , MPI_BYTE, 0, MPI_COMM_WORLD);
         std::cout << _pid << " after gather results" << std::endl;
+
         // choose the best from all received
         if (_pid == 0) {
             for (int i = 0; i < _numberOfProcesses; i++) {
+                if (i == _pid) continue;
                 node_request* request = getNodeReqFromByteArray(recvBuffer, i);
                 std::cout << _pid << " received cost of " << request->cost << " from " << i << std::endl;
-                if ( request->cost < finalBestTourInfo->cost) {
+                if (request->cost < finalBestTourInfo->cost) {
                     std::cout << _pid << " choose from " << i << std::endl;
                     memcpy(finalBestTourInfo, request, NODE_REQUEST_SIZE);
                     std::cout << _pid << " has chosen a cost of " << finalBestTourInfo->cost << std::endl;
@@ -512,64 +498,36 @@ public:
         std::shared_ptr<tour_t> tour;
         if (_pid == 0) {
             queue.push(std::make_shared<VisitedCity>(extendTour(nullptr, 0), 0, computeInitialLowerBound(), 1));
-        }else computeInitialLowerBound();
+        } else computeInitialLowerBound();
 
         // Branch and Bound main loop
         while (std::any_of(processes_state.begin(), processes_state.end(), [](short state) { return state == NOT_TERMINATED; })) {
-            // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-            //     std::cout << _pid << " start while - state of " << i << " is " << processes_state[i] << std::endl;
-            // }
 
             if (queue.empty()) {
-                std::cout << _pid << " has empty queue" << std::endl;
                 mark_as_terminated(_pid);
-                std::cout << _pid << " requesting nodes" << std::endl;
                 mpi_testRecvNodeRequest();
                 broadcast(sendNodeRequest);
                 mpi_testRecvNodeReturn();
-                mpi_testRecvBestTourCost();
 
-                // Continue (while receiving messages and updating process_state)
             } else {
-
                 mpi_testRecvNodeRequest();
-                mpi_testRecvBestTourCost();
-                std::cout << _pid << " queue size " << queue.size() << std::endl;
                 std::shared_ptr<VisitedCity> city = queue.pop();
                 tour = city->getTour();
                 double tourCost = city->getCost();
                 double bound = city->getLB();
                 int length = city->getLength();
                 int node = tour->node;
-                std::cout << _pid << " has " << queue.size() << " nodes in queue" << std::endl;
 
 
-                //std::cout << ".. Visiting new city in the context of tour: (";
-                //showTour(city->getTour());
-                //std::cout << " ) | Node: " << node << "; Cost: " << tourCost <<
-                //    "; Lower-bound: " << bound << "; Length: " << length << "; Visited cities: ";
-                //printBits(tour->visitedCities);
-                //std::cout << std::endl;
-                std::cout << _pid << " looking at tour ending at " << node << " with length " << length << " and LB=" << bound << std::endl;
-                std::cout << _pid << " bestLB=" << _bestLowerBound << " bestToutCost=" << _bestTourCost << std::endl;
+                mpi_testRecvBestTourCost();
                 if (bound >= _bestLowerBound) {
                     queue = PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
-                    // no need to set buffer (nullptr)
-                    std::cout << _pid << " bound >= bestTourCost" << std::endl;
                     mark_as_terminated(_pid);
-                    mpi_testRecvNodeRequest();
                     broadcast(sendNodeRequest);
                     continue;
                 }
-
-                // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-                //     std::cout << _pid << " mid - state of " << i << " is " << processes_state[i] << std::endl;
-                // }
                 
                 if (length == _numberOfCities) {
-                    // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-                    //     std::cout << _pid << " length==n_cities - state of " << i << " is " << processes_state[i] << std::endl;
-                    // }
                     double costUntilEnd = tourCost + _roadsCost[node][0];
                     std::cout << _pid << " length==n_cities. costUntilEnd= " << costUntilEnd << " with bestTourCost " << _bestTourCost << std::endl;
                     if (costUntilEnd < _bestTourCost) {
@@ -585,14 +543,9 @@ public:
                             std::cout << _pid << " sending bestTourCost = " << bestTourCostBuffer << std::endl;
                             broadcast(sendBestTourCost);
                         }
-                        //showTour(_bestTour);
-                        //std::cout << " -- Tour cost: " << _bestTourCost << std::endl;
                     }
                 }
                 else {
-                    // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-                    //     std::cout << _pid << " begin else - state of " << i << " is " << processes_state[i] << std::endl;
-                    // }      
                     for (const int& destiny : _citiesNeighbors[node]) {
                         if (hasNotVisitedCity(tour->visitedCities, destiny)) {
 
@@ -605,18 +558,11 @@ public:
                             queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
                         }
                     }
-                    // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-                    //     std::cout << _pid << " end else - state of " << i << " is " << processes_state[i] << std::endl;
-                    // }    
                 }
-                std::cout << _pid << " has " << queue.size() << " nodes" << std::endl;
-                std::cout << _pid << " condition is " << std::any_of(processes_state.begin(), processes_state.end(), [](short state) { return state == NOT_TERMINATED; }) << std::endl;
-                // for (int i = 0 ; i < _numberOfProcesses ; i++) {
-                //     std::cout << _pid << " end while - state of " << i << " is " << processes_state[i] << std::endl;
-                // }
             }
         }
         std::cout << _pid << " finished findSolution" << std::endl;
+        MPI_Barrier(MPI_COMM_WORLD);
         mpi_shareBestToursAndDecideBest();
     };
 };
@@ -642,15 +588,12 @@ int main(int argc, char* argv[]) {
     elapsed_time += MPI_Wtime();
 
     tsp.destroyMPICommunication(number_of_processes);
+    MPI_Finalize();
 
     if (pid == 0) {
         std::cout << "----- RESULTS ------" << std::endl;
         fprintf(stderr, "Time of execution: %.6fs\n", elapsed_time);
         tsp.print_result();
     }
-
-    // Attention! please 
-    MPI_Finalize();
-
     return 0;
 }
