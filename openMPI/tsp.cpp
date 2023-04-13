@@ -311,17 +311,14 @@ public:
     }
 
     void mark_as_terminated(int id) {
-        std::cout << _pid << " marking " << id << " as terminated" << std::endl;
         processes_state[id] = TERMINATED;
     }
 
     void revoke_terminated(int id) {
-        std::cout << _pid << " revoking " << id <<  std::endl;
         processes_state[id] = NOT_TERMINATED;
     }
 
     void update_process_state(int id, int state) {
-        std::cout << _pid << " marking " << id << " as " << state << std::endl;
         processes_state[id] = state;
     }
 
@@ -390,7 +387,6 @@ public:
                 if (newBestLowerBound < _bestLowerBound) {
                     _bestLowerBound = newBestLowerBound;
                 }
-                std::cout <<_pid << " Received LB " << newBestLowerBound << " From " << senderPid  << " " << std::endl;
                 MPI_Start(&recvBestTourCost[senderPid]);
             }
         }
@@ -522,14 +518,11 @@ public:
                 mpi_testRecvBestTourCost();
                 if (bound >= _bestLowerBound) {
                     queue = PriorityQueue<std::shared_ptr<VisitedCity>, VisitedCity::CompareCityByLowerBound>();
-                    mark_as_terminated(_pid);
-                    broadcast(sendNodeRequest);
                     continue;
                 }
                 
                 if (length == _numberOfCities) {
                     double costUntilEnd = tourCost + _roadsCost[node][0];
-                    std::cout << _pid << " length==n_cities. costUntilEnd= " << costUntilEnd << " with bestTourCost " << _bestTourCost << std::endl;
                     if (costUntilEnd < _bestTourCost) {
                         if (!_bestTour) {
                             _bestTour = std::make_shared<tour_t>();
@@ -540,7 +533,6 @@ public:
                         if (_bestTourCost < _bestLowerBound) {
                             _bestLowerBound = _bestTourCost;
                             bestTourCostBuffer = _bestTourCost;
-                            std::cout << _pid << " sending bestTourCost = " << bestTourCostBuffer << std::endl;
                             broadcast(sendBestTourCost);
                         }
                     }
@@ -552,7 +544,6 @@ public:
                             double cost = _roadsCost[node][destiny];
                             double newBound = newLowerBound(node, destiny, bound, cost);
                             if (newBound > _bestLowerBound) {
-                                std::cout << _pid << " skip node " << destiny << " with newBound=" << newBound << std::endl;
                                 continue;
                             }
                             queue.push(std::make_shared<VisitedCity>(extendTour(tour, destiny), tourCost + cost, newBound, length + 1));
